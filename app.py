@@ -2,10 +2,16 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
-
-# ── Snowflake connection (Streamlit Cloud) ─────────────────────────────────────
 import snowflake.connector
 
+st.set_page_config(
+    page_title="Northwestern Mutual · Portfolio Intelligence",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
+
+# ── Snowflake connection ───────────────────────────────────────────────────────
 @st.cache_resource
 def get_connection():
     return snowflake.connector.connect(
@@ -20,21 +26,30 @@ def get_connection():
 
 @st.cache_data(ttl=3600)
 def run_query(sql):
+    import decimal
     conn = get_connection()
     cur = conn.cursor()
     cur.execute(sql)
     cols = [d[0].lower() for d in cur.description]
-    import pandas as pd
-    return pd.DataFrame(cur.fetchall(), columns=cols)
+    df = pd.DataFrame(cur.fetchall(), columns=cols)
+    # Convert Decimal to float to avoid arithmetic errors
+    for col in df.columns:
+        if df[col].dtype == object:
+            try:
+                sample = df[col].dropna().iloc[0] if len(df[col].dropna()) > 0 else None
+                if isinstance(sample, decimal.Decimal):
+                    df[col] = df[col].astype(float)
+            except:
+                pass
+    return df
 
-# ── Load live data from Snowflake marts ───────────────────────────────────────
-def load_portfolio_summary():
-    return run_query("""
-        SELECT portfolio_name, filing_date,
-               aum_millions, total_value_usd, risk_profile,
-               top_5_concentration_pct, total_equity_pct,
-               total_fixed_income_pct, top_sector, top_sector_pct,
-               total_holdings
+# ── Load live data ─────────────────────────────────────────────────────────────
+@st.cache_data(ttl=3600)
+def load_nm_data():
+    portfolios = run_query("""
+        SELECT portfolio_name, filing_date, aum_millions, total_value_usd,
+               risk_profile, top_5_concentration_pct, total_equity_pct,
+               total_fixed_income_pct, top_sector, top_sector_pct, total_holdings
         FROM NM_ANALYTICS.RAW_MARTS.MART_PORTFOLIO_SUMMARY
         WHERE portfolio_name IN (
             'Index 500 Stock Portfolio',
@@ -43,74 +58,56 @@ def load_portfolio_summary():
             'Active/Passive Balanced Portfolio',
             'Active/Passive Aggressive Portfolio'
         )
-        ORDER BY filing_date DESC, portfolio_name
-    """).to_dict("records")
+        ORDER BY portfolio_name
+    """)
 
-def load_sector_allocation(portfolio_name=None):
-    where = f"WHERE portfolio_name = '{portfolio_name}'" if portfolio_name else ""
-    return run_query(f"""
-        SELECT portfolio_name,
-               sector_name AS name,
-               broad_category,
-               pct_allocation AS pct,
-               sector_value_millions,
-               sector_rank
+    sectors_df = run_query("""
+        SELECT portfolio_name, sector_name AS name, CAST(pct_allocation AS FLOAT) AS pct
         FROM NM_ANALYTICS.RAW_MARTS.MART_SECTOR_ALLOCATION
-        {where}
         ORDER BY portfolio_name, sector_rank
-    """).to_dict("records")
+    """)
 
-def load_top_holdings(portfolio_name=None, top_n=8):
-    where = f"WHERE portfolio_name = '{portfolio_name}' AND holding_rank <= {top_n}" if portfolio_name else f"WHERE holding_rank <= {top_n}"
-    return run_query(f"""
-        SELECT portfolio_name,
-               holding_name AS name,
-               pct_of_portfolio AS pct,
-               value_usd,
-               holding_rank,
-               concentration_tier
+    holdings_df = run_query("""
+        SELECT portfolio_name, holding_name AS name,
+               CAST(pct_of_portfolio AS FLOAT) AS pct, CAST(value_usd AS FLOAT) AS value_usd
         FROM NM_ANALYTICS.RAW_MARTS.MART_TOP_HOLDINGS
-        {where}
+        WHERE holding_rank <= 8
         ORDER BY portfolio_name, holding_rank
-    """).to_dict("records")
+    """)
 
-def load_risk_metrics():
-    return run_query("""
-        SELECT portfolio_name, risk_profile, equity_beta_proxy,
-               volatility_ann_pct, duration_years_proxy, top_5_concentration_pct
-        FROM NM_ANALYTICS.RAW_MARTS.MART_RISK_METRICS
-        ORDER BY filing_date DESC, portfolio_name
-    """).to_dict("records")
+    nm_data = []
+    for _, p in portfolios.iterrows():
+        pname = p["portfolio_name"]
+        secs = [{"name": str(r["name"]), "pct": float(r["pct"] or 0)}
+                for _, r in sectors_df[sectors_df["portfolio_name"] == pname].iterrows()]
+        holds = [{"name": str(r["name"]), "pct": float(r["pct"] or 0), "value": float(r["value_usd"] or 0)}
+                 for _, r in holdings_df[holdings_df["portfolio_name"] == pname].iterrows()]
+        nm_data.append({
+            "name":        pname,
+            "assetClass":  str(p.get("risk_profile") or "Multi-Asset"),
+            "period":      str(p.get("filing_date", ""))[:7],
+            "totalValue":  int(float(p.get("aum_millions") or 0) * 1000),
+            "sectors":     secs,
+            "topHoldings": holds,
+        })
+    return nm_data
 
+@st.cache_data(ttl=3600)
 def load_dbt_tests():
     return [
-        {"model":"stg_positions","layer":"staging","tests":"4/4","rows":7324,"last_run":"latest","status":"passing"},
-        {"model":"stg_portfolios","layer":"staging","tests":"2/2","rows":29,"last_run":"latest","status":"passing"},
-        {"model":"stg_sectors","layer":"staging","tests":"2/2","rows":29,"last_run":"latest","status":"passing"},
-        {"model":"stg_benchmarks","layer":"staging","tests":"3/3","rows":8,"last_run":"latest","status":"passing"},
-        {"model":"int_portfolio_valuations","layer":"intermediate","tests":"9/9","rows":7324,"last_run":"latest","status":"passing"},
-        {"model":"int_sector_enriched","layer":"intermediate","tests":"5/5","rows":29,"last_run":"latest","status":"passing"},
-        {"model":"mart_sector_allocation","layer":"mart","tests":"5/5","rows":29,"last_run":"latest","status":"passing"},
-        {"model":"mart_portfolio_summary","layer":"mart","tests":"6/6","rows":29,"last_run":"latest","status":"passing"},
-        {"model":"mart_top_holdings","layer":"mart","tests":"3/3","rows":7324,"last_run":"latest","status":"passing"},
-        {"model":"mart_risk_metrics","layer":"mart","tests":"7/7","rows":29,"last_run":"latest","status":"passing"},
+        {"model":"stg_positions",           "layer":"staging",      "tests":"4/4", "rows":7324, "last_run":"latest","status":"passing"},
+        {"model":"stg_portfolios",          "layer":"staging",      "tests":"2/2", "rows":29,   "last_run":"latest","status":"passing"},
+        {"model":"stg_sectors",             "layer":"staging",      "tests":"2/2", "rows":5,    "last_run":"latest","status":"passing"},
+        {"model":"stg_benchmarks",          "layer":"staging",      "tests":"3/3", "rows":8,    "last_run":"latest","status":"passing"},
+        {"model":"int_portfolio_valuations","layer":"intermediate", "tests":"9/9", "rows":7324, "last_run":"latest","status":"passing"},
+        {"model":"int_sector_enriched",     "layer":"intermediate", "tests":"5/5", "rows":5,    "last_run":"latest","status":"passing"},
+        {"model":"mart_sector_allocation",  "layer":"mart",         "tests":"5/5", "rows":5,    "last_run":"latest","status":"passing"},
+        {"model":"mart_portfolio_summary",  "layer":"mart",         "tests":"6/6", "rows":29,   "last_run":"latest","status":"passing"},
+        {"model":"mart_top_holdings",       "layer":"mart",         "tests":"3/3", "rows":7324, "last_run":"latest","status":"passing"},
+        {"model":"mart_risk_metrics",       "layer":"mart",         "tests":"7/7", "rows":29,   "last_run":"latest","status":"passing"},
     ]
 
-# Load data
-_portfolios = load_portfolio_summary()
-NM_DATA = []
-for p in _portfolios:
-    # Build NM_DATA compatible structure from live Snowflake data
-    sectors = load_sector_allocation(p["portfolio_name"])
-    holdings = load_top_holdings(p["portfolio_name"])
-    NM_DATA.append({
-        "name":         p["portfolio_name"],
-        "assetClass":   p.get("risk_profile", "Multi-Asset"),
-        "period":       str(p.get("filing_date", ""))[:7],
-        "totalValue":   int(float(p.get("aum_millions") or 0) * 1000),
-        "sectors":      [{"name": s.get("name",""), "pct": float(s.get("pct") or 0)} for s in sectors if s.get("name")],
-        "topHoldings":  [{"name": h.get("name",""), "pct": float(h.get("pct") or 0), "value": int(float(h.get("value_usd") or 0))} for h in holdings if h.get("name")],
-    })
+NM_DATA  = load_nm_data()
 DBT_TESTS = load_dbt_tests()
 
 
@@ -301,20 +298,27 @@ def bar_chart(df, x_col, y_col, color="#185FA5", height=240):
     fig.update_layout(
         margin=dict(l=0,r=50,t=0,b=0), height=height,
         plot_bgcolor="#fff", paper_bgcolor="#fff",
-        xaxis=dict(showgrid=False, showticklabels=False, range=[0, df[x_col].max()*1.3]),
-        yaxis=dict(showgrid=False, tickfont=dict(size=10, family="DM Sans")),
+        xaxis=dict(showgrid=False, showticklabels=False, color="#111827", range=[0, df[x_col].max()*1.3]),
+        yaxis=dict(showgrid=False, color="#111827", tickfont=dict(size=10, family="DM Sans", color="#111827")),
         showlegend=False,
     )
     return fig
 
-# ── Header ────────────────────────────────────────────────────────────────────
-active_tab = st.radio(
-    "Navigation",
-    ["Overview", "All portfolios", "Compare", "Risk", "Data quality"],
-    horizontal=True,
-    label_visibility="collapsed",
-)
-nav_html = ""
+# ── Header + KPI + Nav — all one HTML block ─────────────────────────────────
+params = st.query_params
+active_tab = params.get("tab", "Overview")
+if active_tab not in ["Overview", "All portfolios", "Compare", "Risk", "Data quality"]:
+    active_tab = "Overview"
+
+def nav_link(label, active):
+    if active:
+        style = "color:#FFB500;font-weight:600;border-bottom:3px solid #FFB500;"
+    else:
+        style = "color:#93B8D8;border-bottom:3px solid transparent;"
+    tab_param = label.replace(" ", "+")
+    return f'''<a href="?tab={tab_param}" target="_self" style="text-decoration:none;font-size:13px;padding:10px 16px 12px;display:inline-block;{style};white-space:nowrap;">{label}</a>'''
+
+nav_html = "".join([nav_link(t, t == active_tab) for t in ["Overview","All portfolios","Compare","Risk","Data quality"]])
 
 st.markdown(f"""
 <div style="background:#003366;border-radius:12px;padding:16px 24px 0 24px;margin-bottom:16px;">
@@ -359,16 +363,16 @@ st.markdown(f"""
 
 st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
-
-
-
-
-
+tab1_active = active_tab == "Overview"
+tab2_active = active_tab == "All portfolios"
+tab3_active = active_tab == "Compare"
+tab4_active = active_tab == "Risk"
+tab5_active = active_tab == "Data quality"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 1 — OVERVIEW
 # ══════════════════════════════════════════════════════════════════════════════
-if active_tab == "Overview":
+if tab1_active:
     portfolio_names = [p["name"] for p in NM_DATA]
     selected = st.selectbox("Select a portfolio to explore", portfolio_names, key="overview_select")
     portfolio = next(p for p in NM_DATA if p["name"] == selected)
@@ -379,7 +383,7 @@ if active_tab == "Overview":
 
     with col_l:
         st.markdown(f'<p style="font-size:13px;font-weight:500;color:#0F1929;margin:0 0 4px;">Sector allocation · {selected}</p>', unsafe_allow_html=True)
-        df_sec = pd.DataFrame(portfolio["sectors"]) if portfolio["sectors"] else pd.DataFrame({"name":["No data"],"pct":[100]})
+        df_sec = pd.DataFrame(portfolio["sectors"])
         PIE_COLORS = ["#003366","#FFB500","#1A6EB5","#CC8800","#4D9FD6","#E6C200","#336699","#F0A500"]
         fig = go.Figure(go.Pie(
             labels=df_sec["name"], values=df_sec["pct"],
@@ -392,7 +396,7 @@ if active_tab == "Overview":
             margin=dict(l=10,r=10,t=10,b=10), height=280,
             paper_bgcolor="#fff", plot_bgcolor="#fff",
             showlegend=False,
-            font=dict(family="DM Sans"),
+            font=dict(family="DM Sans", color="#111827"),
         )
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
@@ -408,8 +412,8 @@ if active_tab == "Overview":
         fig2.update_layout(
             margin=dict(l=0,r=60,t=0,b=0), height=280,
             plot_bgcolor="#fff", paper_bgcolor="#fff",
-            xaxis=dict(showgrid=False, showticklabels=False, range=[0, df_h["pct"].max()*1.35]),
-            yaxis=dict(showgrid=False, tickfont=dict(size=10, family="DM Sans")),
+            xaxis=dict(showgrid=False, showticklabels=False, color="#111827", range=[0, df_h["pct"].max()*1.35]),
+            yaxis=dict(showgrid=False, color="#111827", tickfont=dict(size=10, family="DM Sans", color="#111827")),
             showlegend=False,
         )
         st.plotly_chart(fig2, use_container_width=True, config={"displayModeBar": False})
@@ -451,7 +455,7 @@ if active_tab == "Overview":
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 2 — ALL PORTFOLIOS
 # ══════════════════════════════════════════════════════════════════════════════
-if active_tab == "All portfolios":
+if tab2_active:
     st.markdown('<div class="chart-card">', unsafe_allow_html=True)
     st.markdown('<p class="chart-title">All portfolios · full dataset</p>', unsafe_allow_html=True)
 
@@ -469,7 +473,7 @@ if active_tab == "All portfolios":
             "Domestic Equity","Info Technology","Financials","Health Care",
             "Consumer Disc.","Industrials","Comm. Services","Intl Equity"))
         fi_pct = next((s["pct"] for s in p["sectors"] if s["name"] == "Fixed Income"), 0)
-        top_sector = max(p["sectors"], key=lambda x: x["pct"]) if p["sectors"] else {"name": "N/A", "pct": 0}
+        top_sector = max(p["sectors"], key=lambda x: x["pct"])
         rows += f"""<tr style="{bg}">
             <td style="font-weight:500;color:#0F1929;">{p["name"]}</td>
             <td>{p["assetClass"]}</td>
@@ -507,10 +511,10 @@ if active_tab == "All portfolios":
     fig_aum.update_layout(
         height=300, margin=dict(l=0,r=0,t=10,b=60),
         plot_bgcolor="#fff", paper_bgcolor="#fff",
-        xaxis=dict(tickfont=dict(size=10,family="DM Sans"),showgrid=False,tickangle=-30),
-        yaxis=dict(showgrid=True,gridcolor="#F0F4FA",tickfont=dict(size=10)),
-        legend=dict(orientation="h",yanchor="bottom",y=1.02,xanchor="right",x=1,font=dict(size=11)),
-        font=dict(family="DM Sans"),
+        xaxis=dict(tickfont=dict(size=10, family="DM Sans", color="#111827"),showgrid=False,tickangle=-30),
+        yaxis=dict(showgrid=True,gridcolor="#F0F4FA",tickfont=dict(size=10, color="#111827")),
+        legend=dict(orientation="h",yanchor="bottom",y=1.02,xanchor="right",x=1,font=dict(size=11, color="#111827")),
+        font=dict(family="DM Sans", color="#111827"),
     )
     st.plotly_chart(fig_aum, use_container_width=True, config={"displayModeBar": False})
     st.markdown('</div>', unsafe_allow_html=True)
@@ -518,7 +522,7 @@ if active_tab == "All portfolios":
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 3 — COMPARE
 # ══════════════════════════════════════════════════════════════════════════════
-if active_tab == "Compare":
+if tab3_active:
     names = [p["name"] for p in NM_DATA]
     c1, c2 = st.columns(2)
     with c1:
@@ -570,10 +574,6 @@ if active_tab == "Compare":
     for col, port, color in [(cc1, p1, COLORS[0]), (cc2, p2, COLORS[1])]:
         with col:
             st.markdown(f'<div class="chart-card"><p class="chart-title">Sector allocation · {port["name"]}</p>', unsafe_allow_html=True)
-            if not port["sectors"]:
-                st.markdown('<p style="color:#9CA3AF;font-size:12px;">No sector data available</p>', unsafe_allow_html=True)
-                st.markdown('</div>', unsafe_allow_html=True)
-                continue
             df = pd.DataFrame(port["sectors"])
             fig = go.Figure(go.Bar(
                 x=df["pct"], y=df["name"], orientation="h",
@@ -584,8 +584,8 @@ if active_tab == "Compare":
             fig.update_layout(
                 margin=dict(l=0,r=50,t=0,b=0), height=220,
                 plot_bgcolor="#fff", paper_bgcolor="#fff",
-                xaxis=dict(showgrid=False, showticklabels=False, range=[0, df["pct"].max()*1.35]),
-                yaxis=dict(showgrid=False, tickfont=dict(size=10, family="DM Sans")),
+                xaxis=dict(showgrid=False, showticklabels=False, color="#111827", range=[0, df["pct"].max()*1.35]),
+                yaxis=dict(showgrid=False, color="#111827", tickfont=dict(size=10, family="DM Sans", color="#111827")),
                 showlegend=False,
             )
             st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
@@ -596,10 +596,6 @@ if active_tab == "Compare":
     for col, port, color in [(ch1, p1, COLORS[0]), (ch2, p2, COLORS[1])]:
         with col:
             st.markdown(f'<div class="chart-card"><p class="chart-title">Top holdings · {port["name"]}</p>', unsafe_allow_html=True)
-            if not port["topHoldings"]:
-                st.markdown('<p style="color:#9CA3AF;font-size:12px;">No holdings data available</p>', unsafe_allow_html=True)
-                st.markdown('</div>', unsafe_allow_html=True)
-                continue
             df = pd.DataFrame(port["topHoldings"])
             fig = go.Figure(go.Bar(
                 x=df["pct"], y=df["name"], orientation="h",
@@ -610,8 +606,8 @@ if active_tab == "Compare":
             fig.update_layout(
                 margin=dict(l=0,r=60,t=0,b=0), height=220,
                 plot_bgcolor="#fff", paper_bgcolor="#fff",
-                xaxis=dict(showgrid=False, showticklabels=False, range=[0, df["pct"].max()*1.4]),
-                yaxis=dict(showgrid=False, tickfont=dict(size=10, family="DM Sans")),
+                xaxis=dict(showgrid=False, showticklabels=False, color="#111827", range=[0, df["pct"].max()*1.4]),
+                yaxis=dict(showgrid=False, color="#111827", tickfont=dict(size=10, family="DM Sans", color="#111827")),
                 showlegend=False,
             )
             st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
@@ -620,7 +616,7 @@ if active_tab == "Compare":
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 4 — RISK
 # ══════════════════════════════════════════════════════════════════════════════
-if active_tab == "Risk":
+if tab4_active:
     risk_data = [
         {"Portfolio": "Index 500 Stock", "Risk profile": "Aggressive", "Equity beta": 1.00, "Volatility (ann.)": "15.2%", "Duration (yrs)": "—", "Top 5 conc.": "29.4%"},
         {"Portfolio": "Index 400 Stock", "Risk profile": "Aggressive", "Equity beta": 1.05, "Volatility (ann.)": "17.8%", "Duration (yrs)": "—", "Top 5 conc.": "5.3%"},
@@ -672,8 +668,8 @@ if active_tab == "Risk":
         fig.update_layout(
             height=260, margin=dict(l=0,r=0,t=20,b=0),
             plot_bgcolor="#fff", paper_bgcolor="#fff",
-            xaxis=dict(tickfont=dict(size=10,family="DM Sans"),showgrid=False),
-            yaxis=dict(showgrid=True,gridcolor="#F0F4FA",ticksuffix="%",tickfont=dict(size=10)),
+            xaxis=dict(tickfont=dict(size=10, family="DM Sans", color="#111827"),showgrid=False),
+            yaxis=dict(showgrid=True,gridcolor="#F0F4FA",ticksuffix="%",tickfont=dict(size=10, color="#111827")),
         )
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
         st.markdown('</div>', unsafe_allow_html=True)
@@ -689,8 +685,8 @@ if active_tab == "Risk":
         fig2.update_layout(
             height=260, margin=dict(l=0,r=0,t=20,b=0),
             plot_bgcolor="#fff", paper_bgcolor="#fff",
-            xaxis=dict(tickfont=dict(size=10,family="DM Sans"),showgrid=False),
-            yaxis=dict(showgrid=True,gridcolor="#F0F4FA",tickfont=dict(size=10)),
+            xaxis=dict(tickfont=dict(size=10, family="DM Sans", color="#111827"),showgrid=False),
+            yaxis=dict(showgrid=True,gridcolor="#F0F4FA",tickfont=dict(size=10, color="#111827")),
         )
         st.plotly_chart(fig2, use_container_width=True, config={"displayModeBar": False})
         st.markdown('</div>', unsafe_allow_html=True)
@@ -698,7 +694,7 @@ if active_tab == "Risk":
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 5 — DATA QUALITY
 # ══════════════════════════════════════════════════════════════════════════════
-if active_tab == "Data quality":
+if tab5_active:
     pass_count = sum(1 for t in DBT_TESTS if t["status"] == "passing")
     warn_count = sum(1 for t in DBT_TESTS if t["status"] == "warning")
 
