@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 import snowflake.connector
+from nm_theme import nm_inject_css, nm_header, nm_kpi_row, COLORS, PIE_COLORS
 
 st.set_page_config(
     page_title="Northwestern Mutual · Portfolio Intelligence",
@@ -112,170 +113,8 @@ NM_DATA  = load_nm_data()
 DBT_TESTS = load_dbt_tests()
 
 
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono&display=swap');
-html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
-.block-container { padding-top: 0.5rem !important; padding-bottom: 1rem !important; padding-left: 1rem !important; padding-right: 1rem !important; }
-div[data-testid="stVerticalBlock"] > div { gap: 0.4rem !important; }
-div[data-testid="element-container"] { margin: 0 !important; }
-.stPlotlyChart > div { margin: 0 !important; }
-.stSelectbox { margin-bottom: 0 !important; }
-.stTabs [data-baseweb="tab-list"] {
-    gap: 0px;
-    background: #fff;
-    border: 2px solid #003366;
-    border-radius: 10px;
-    padding: 4px;
-    margin-bottom: 12px;
-    width: fit-content;
-}
-.stTabs [data-baseweb="tab"] {
-    border-radius: 7px;
-    padding: 6px 20px;
-    font-size: 13px;
-    font-weight: 500;
-    color: #003366;
-    background: transparent;
-    border: none;
-}
-.stTabs [aria-selected="true"] {
-    background: #003366 !important;
-    color: #FFB500 !important;
-}
-.stTabs [data-baseweb="tab-highlight"] { display: none; }
-.stTabs [data-baseweb="tab-border"] { display: none; }
-.stTabs [data-baseweb="tab-panel"] { padding-top: 12px !important; }
-section[data-testid="stAppViewContainer"] { padding-top: 0 !important; }
-section[data-testid="stAppViewContainer"] > div:first-child { padding-top: 0 !important; }
-div[data-testid="stAppViewBlockContainer"] { padding-top: 0.5rem !important; }
-#MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
-.stApp { background: #F5F7FA; }
+nm_inject_css()
 
-.nm-topbar {
-    background: #003366;
-    padding: 14px 24px;
-    border-radius: 12px 12px 0 0;
-    display: flex; align-items: center; justify-content: space-between;
-    margin-bottom: 0;
-}
-.nm-topbar-title { font-size: 16px; font-weight: 500; color: #fff; margin: 0; }
-.nm-topbar-sub { font-size: 11px; color: #B8D4F0; margin: 2px 0 0; }
-.nm-badge { display: inline-block; font-size: 10px; font-weight: 500; padding: 3px 9px; border-radius: 20px; margin-left: 6px; }
-.badge-green { background: #FFB500; color: #003366; }
-.badge-blue  { background: #004080; color: #B8D4F0; }
-
-.kpi-card {
-    background: #fff;
-    border: 0.5px solid #E0E8F4;
-    border-radius: 10px;
-    padding: 14px 18px;
-    border-left: 3px solid #1B4F8A;
-}
-.kpi-label { font-size: 10px; color: #6B7280; text-transform: uppercase; letter-spacing: 0.07em; margin: 0 0 5px; }
-.kpi-value { font-size: 24px; font-weight: 500; color: #0F1929; margin: 0 0 3px; }
-.kpi-delta-up   { font-size: 11px; color: #003D00; margin: 0; }
-.kpi-delta-flat { font-size: 11px; color: #6B7280; margin: 0; }
-
-.port-card {
-    background: #fff;
-    border: 0.5px solid #E0E8F4;
-    border-radius: 10px;
-    padding: 14px 16px;
-    margin-bottom: 10px;
-    cursor: pointer;
-    transition: border-color 0.15s;
-}
-.port-card:hover { border-color: #FFB500; }
-.port-card.selected { border: 1.5px solid #FFB500; background: #F5F9FF; }
-.port-name { font-size: 13px; font-weight: 500; color: #0F1929; margin: 0 0 3px; }
-.port-meta { font-size: 11px; color: #6B7280; margin: 0 0 8px; }
-
-.risk-pill { display: inline-block; font-size: 10px; font-weight: 500; padding: 2px 8px; border-radius: 20px; }
-.risk-agg  { background: #FCEBEB; color: #A32D2D; }
-.risk-bal  { background: #E6F1FB; color: #003366; }
-.risk-gro  { background: #FAEEDA; color: #633806; }
-.risk-con  { background: #EAF3DE; color: #003D00; }
-
-.chart-card {
-    background: #fff;
-    border: 0.5px solid #E0E8F4;
-    border-radius: 10px;
-    padding: 16px 18px;
-    margin-bottom: 12px;
-}
-.chart-title { font-size: 13px; font-weight: 500; color: #0F1929; margin: 0 0 14px; }
-
-.tbl { width: 100%; border-collapse: collapse; font-size: 12px; }
-.tbl th { padding: 8px 12px; text-align: left; font-size: 10px; color: #6B7280; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1.5px solid #003366; font-weight: 500; }
-.tbl td { padding: 9px 12px; border-bottom: 0.5px solid #F0F4FA; color: #1A2840; }
-.tbl tr:nth-child(even) td { background: #FAFBFD; }
-.pill { display:inline-block; font-size:10px; font-weight:500; padding:2px 8px; border-radius:20px; }
-.pill-green  { background:#EAF3DE; color:#27500A; }
-.pill-amber  { background:#FAEEDA; color:#633806; }
-.pill-blue   { background:#E6F1FB; color:#0C447C; }
-.pill-purple { background:#EEEDFE; color:#3C3489; }
-.mono { font-family: 'DM Mono', monospace; font-size: 11px; }
-
-div[data-testid="stHorizontalBlock"] > div { gap: 10px; }
-div[data-testid="stHorizontalBlock"]:first-of-type > div { gap: 0 !important; }
-.stPlotlyChart { border-radius: 8px; overflow: hidden; }
-div[data-testid="stTabs"] button { font-size: 13px; }
-::-webkit-scrollbar { width: 5px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #B8D0E8; border-radius: 10px; }
-
-div[data-testid="stHorizontalBlock"].nav-bar > div { gap: 0 !important; }
-
-div.nm-nav { background: #002244; border-radius: 0 0 12px 12px; padding: 0 24px; margin-bottom: 0; border-top: 1px solid #1A3A6B; }
-
-div[role="radiogroup"] { display: flex; gap: 0; background: #002244; border-radius: 0 0 12px 12px; padding: 0 8px; }
-div[role="radiogroup"] > label {
-    display: flex; align-items: center;
-    padding: 10px 20px;
-    font-size: 13px; font-weight: 500;
-    color: #B8D4F0 !important;
-    cursor: pointer;
-    border-bottom: 3px solid transparent;
-    margin: 0;
-}
-div[role="radiogroup"] > label:hover { color: #fff !important; border-bottom-color: #FFB50088; }
-div[role="radiogroup"] > label[data-checked="true"] { color: #FFB500 !important; border-bottom-color: #FFB500; }
-div[role="radiogroup"] > label > div:first-child { display: none; }
-div[role="radiogroup"] > label > div:last-child { font-size: 13px !important; }
-.stRadio > label { display: none !important; }
-.stRadio > div {
-    background: #003366 !important;
-    border-radius: 0 12px 12px 0 !important;
-    padding: 0 20px !important;
-    margin: 0 !important;
-    height: 100% !important;
-    display: flex !important;
-    align-items: center !important;
-}
-div[role="radiogroup"] {
-    background: #003366 !important;
-    padding: 0 !important;
-    display: flex !important;
-    align-items: center !important;
-    height: 100% !important;
-    gap: 0 !important;
-}
-div[role="radiogroup"] > label {
-    padding: 10px 16px !important;
-    font-size: 13px !important;
-    font-weight: 500 !important;
-    color: #B8D4F0 !important;
-    border-bottom: 3px solid transparent !important;
-    cursor: pointer !important;
-    white-space: nowrap !important;
-}
-div[role="radiogroup"] > label:hover { color: #fff !important; border-bottom-color: #FFB50066 !important; }
-div[role="radiogroup"] > label[data-checked="true"] { color: #FFB500 !important; border-bottom-color: #FFB500 !important; font-weight: 600 !important; }
-div[role="radiogroup"] > label > div:first-child { display: none !important; }
-
-</style>
-""", unsafe_allow_html=True)
-
-COLORS = ["#003366","#FFB500","#1A6EB5","#CC8800","#4D9FD6","#E6C200","#336699","#F0A500","#005599","#FFD060"]
 
 def fmt_aum(v):
     if v is None or v == 0: return "N/A"
@@ -305,62 +144,21 @@ def bar_chart(df, x_col, y_col, color="#185FA5", height=240):
     )
     return fig
 
-# ── Header + KPI + Nav — all one HTML block ─────────────────────────────────
-params = st.query_params
-active_tab = params.get("tab", "Overview")
-if active_tab not in ["Overview", "All portfolios", "Compare", "Risk", "Data quality"]:
-    active_tab = "Overview"
+# ── Header + KPI + Nav ──────────────────────────────────────────────────────
+TABS = ["Overview", "All portfolios", "Compare", "Risk", "Data quality"]
+active_tab = nm_header(
+    app_title="Portfolio Intelligence",
+    subtitle="7,324 holdings · SEC NPORT-P · Feb 2026",
+    tabs=TABS,
+    badges=[("● dbt passing", "green"), ("Snowflake live", "blue")],
+)
 
-def nav_link(label, active):
-    if active:
-        style = "color:#FFB500;font-weight:600;border-bottom:3px solid #FFB500;"
-    else:
-        style = "color:#93B8D8;border-bottom:3px solid transparent;"
-    tab_param = label.replace(" ", "+")
-    return f'''<a href="?tab={tab_param}" target="_self" style="text-decoration:none;font-size:13px;padding:10px 16px 12px;display:inline-block;{style};white-space:nowrap;">{label}</a>'''
-
-nav_html = "".join([nav_link(t, t == active_tab) for t in ["Overview","All portfolios","Compare","Risk","Data quality"]])
-
-st.markdown(f"""
-<div style="background:#003366;border-radius:12px;padding:16px 24px 0 24px;margin-bottom:16px;">
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-    <div>
-      <span style="color:#FFB500;font-weight:700;font-size:22px;letter-spacing:-0.02em;">Northwestern Mutual</span>
-      <span style="color:#B8D4F0;font-size:13px;font-weight:400;margin-left:10px;">· Portfolio Intelligence</span>
-    </div>
-    <div style="display:flex;align-items:center;gap:8px;">
-      <span style="background:#FFB500;color:#003366;font-size:10px;font-weight:700;padding:4px 10px;border-radius:20px;">● dbt passing</span>
-      <span style="background:#004D99;color:#B8D4F0;font-size:10px;padding:4px 10px;border-radius:20px;">Snowflake live</span>
-      <span style="color:#6B8FC0;font-size:10px;margin-left:4px;">7,324 holdings · Feb 2026</span>
-    </div>
-  </div>
-  <div style="display:flex;align-items:center;gap:0;margin:0 -8px;">
-    {nav_html}
-  </div>
-</div>
-<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px;">
-  <div style="background:#fff;border:2px solid #003366;border-top:5px solid #003366;border-radius:10px;padding:16px 20px;">
-    <p style="font-size:10px;color:#6B7280;text-transform:uppercase;letter-spacing:0.07em;margin:0 0 8px;">Total portfolios</p>
-    <p style="font-size:28px;font-weight:700;color:#003366;margin:0 0 5px;line-height:1;">29</p>
-    <p style="font-size:11px;color:#6B7280;margin:0;">Feb 2026 NPORT-P filings</p>
-  </div>
-  <div style="background:#fff;border:2px solid #FFB500;border-top:5px solid #FFB500;border-radius:10px;padding:16px 20px;">
-    <p style="font-size:10px;color:#6B7280;text-transform:uppercase;letter-spacing:0.07em;margin:0 0 8px;">Total holdings</p>
-    <p style="font-size:28px;font-weight:700;color:#003366;margin:0 0 5px;line-height:1;">7,324</p>
-    <p style="font-size:11px;color:#CC8800;margin:0;font-weight:500;">↑ Full SEC filing data</p>
-  </div>
-  <div style="background:#fff;border:2px solid #003366;border-top:5px solid #003366;border-radius:10px;padding:16px 20px;">
-    <p style="font-size:10px;color:#6B7280;text-transform:uppercase;letter-spacing:0.07em;margin:0 0 8px;">dbt models</p>
-    <p style="font-size:28px;font-weight:700;color:#003366;margin:0 0 5px;line-height:1;">10</p>
-    <p style="font-size:11px;color:#CC8800;margin:0;font-weight:500;">46 tests passing</p>
-  </div>
-  <div style="background:#fff;border:2px solid #FFB500;border-top:5px solid #FFB500;border-radius:10px;padding:16px 20px;">
-    <p style="font-size:10px;color:#6B7280;text-transform:uppercase;letter-spacing:0.07em;margin:0 0 8px;">Data quality</p>
-    <p style="font-size:28px;font-weight:700;color:#003366;margin:0 0 5px;line-height:1;">100%</p>
-    <p style="font-size:11px;color:#27500A;margin:0;font-weight:500;">✓ No failures</p>
-  </div>
-</div>
-""", unsafe_allow_html=True)
+nm_kpi_row([
+    {"label": "Total portfolios", "value": "29",    "delta": "Feb 2026 NPORT-P filings"},
+    {"label": "Total holdings",   "value": "7,324", "delta": "↑ Full SEC filing data", "delta_style": "up"},
+    {"label": "dbt models",       "value": "10",    "delta": "46 tests passing",       "delta_style": "up"},
+    {"label": "Data quality",     "value": "100%",  "delta": "✓ No failures",          "delta_style": "success"},
+])
 
 st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
