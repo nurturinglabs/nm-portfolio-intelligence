@@ -298,26 +298,6 @@ if tab2_active:
     """, unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-    
-
-    st.markdown('<div class="chart-card">', unsafe_allow_html=True)
-    st.markdown('<p class="chart-title">AUM by portfolio</p>', unsafe_allow_html=True)
-    df_aum = pd.DataFrame([{"Portfolio": p["name"], "AUM ($M)": p["totalValue"]/1000, "Asset Class": p["assetClass"]} for p in NM_DATA])
-    df_aum = df_aum.sort_values("AUM ($M)", ascending=False)
-    color_map = {"Domestic Equity":"#003366","Mid-Cap Equity":"#FFB500","Multi-Asset":"#005599","Growth":"#CC9200"}
-    fig_aum = px.bar(df_aum, x="Portfolio", y="AUM ($M)", color="Asset Class",
-                     color_discrete_map=color_map)
-    fig_aum.update_layout(
-        height=300, margin=dict(l=0,r=0,t=10,b=60),
-        plot_bgcolor="#fff", paper_bgcolor="#fff",
-        xaxis=dict(tickfont=dict(size=10, family="DM Sans", color="#111827"),showgrid=False,tickangle=-30),
-        yaxis=dict(showgrid=True,gridcolor="#F0F4FA",tickfont=dict(size=10, color="#111827")),
-        legend=dict(orientation="h",yanchor="bottom",y=1.02,xanchor="right",x=1,font=dict(size=11, color="#111827")),
-        font=dict(family="DM Sans", color="#111827"),
-    )
-    st.plotly_chart(fig_aum, use_container_width=True, config={"displayModeBar": False})
-    st.markdown('</div>', unsafe_allow_html=True)
-
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 3 — COMPARE
 # ══════════════════════════════════════════════════════════════════════════════
